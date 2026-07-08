@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 import logging
+import uvicorn
 
 from app.agents.workflows import generate_graph, refine_graph
 
@@ -131,3 +132,7 @@ async def debug_notebook(request: DebugRequest):
     except Exception as e:
         logger.error(f"Debug pipeline failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
