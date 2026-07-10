@@ -63,10 +63,22 @@ async def generate_notebook(request: GenerateRequest):
         "target_problem": "",
         "subtask_prompts": {},
         "notebook_cells": {},
-        "compiled_script": ""
+        "compiled_script": "",
+        "is_valid_ea_prompt":True,
+        "rejection_reason":""
     }
     try:
         result = await generate_graph.ainvoke(initial_state)
+
+        if not result.get("is_valid_ea_prompt"):
+            return GenerateResponse(
+                status="rejected",
+                target_problem="Invalid Domain",
+                cells={},
+                compiled_script=f"# ERROR:{result.get('rejection_reason')}"
+            )
+
+
         return GenerateResponse(
             status="success",
             target_problem=result.get("target_problem", "Unknown"),

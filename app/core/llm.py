@@ -6,14 +6,14 @@ load_dotenv()
 
 # Architect model for task planning and tutoring
 architect_llm = ChatOpenAI(
-    model="google/gemma-4-26b-a4b-it",
+    model="nvidia/nemotron-3-ultra-550b-a55b",
     api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1",
+    base_url="https://integrate.api.nvidia.com/v1",
 )
 
 # Coder model for parallel code block writing
 coder_llm = ChatOpenAI(
-    model="google/gemma-4-26b-a4b-it",
+    model="nvidia/nemotron-3-ultra-550b-a55b",
     api_key=os.getenv("OPENROUTER_API_KEY"),
-    base_url="https://openrouter.ai/api/v1",
+    base_url="https://integrate.api.nvidia.com/v1",
 )
