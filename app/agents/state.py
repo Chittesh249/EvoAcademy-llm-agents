@@ -30,3 +30,7 @@ class NotebookState(TypedDict):
     is_traceback_error: bool
     traceback_msg: str
     educational_response: str
+    is_valid_ea_prompt:bool
+    rejection_reason:str
+
+

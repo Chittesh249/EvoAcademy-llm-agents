@@ -1,13 +1,15 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 from app.agents.state import NotebookState, CoderState
-from app.agents.nodes.generation import task_splitter_node, parallel_coder_node
+from app.agents.nodes.generation import task_splitter_node, parallel_coder_node, prompt_guardrail_node
 from app.agents.nodes.verification import unit_verifier_node
 
 DEAP_CELLS = [
     "imports", "config", "creator", "evaluation", "crossover", "mutation", "selection",
     "initialization", "toolbox", "main_algorithm", "stats", "visualization"
 ]
+
+
 
 # Route coder based on syntax validity
 def route_verification(state: CoderState):
@@ -113,3 +115,28 @@ refine_workflow.add_edge("fixer_agent", END)
 refine_workflow.add_edge("learner_agent", END)
 
 refine_graph = refine_workflow.compile()
+
+def route_gatekeeper(state:NotebookState)->str:
+    if state.get("is_valid_ea_prompt"):
+        return "task_splitter"
+    return END
+
+main_workflow = StateGraph(NotebookState)
+
+main_workflow.add_node("prompt_guardrail",prompt_guardrail_node)
+main_workflow.add_node("task_splitter",task_splitter_node)
+main_workflow.add_node("coder_subgraph",coder_subgraph)
+main_workflow.add_node("orchestrator",orchestrator_node)
+
+main_workflow.add_edge(START,"prompt_guardrail")
+
+main_workflow.add_conditional_edges("prompt_guardrail",route_gatekeeper,{
+    "task_splitter":"task_splitter",
+    END:END
+})
+
+main_workflow.add_conditional_edges("task_splitter",orchestrate_parallel_coders,["coder_subgraph"])
+main_workflow.add_edge("coder_subgraph","orchestrator")
+main_workflow.add_edge("orchestrator",END)
+
+generate_graph = main_workflow.compile()
