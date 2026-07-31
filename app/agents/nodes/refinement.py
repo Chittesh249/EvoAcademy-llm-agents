@@ -21,6 +21,7 @@ def dependency_analyzer_node(state: NotebookState):
     user_request = state.get("user_prompt", "")
     
     ast_map = analyze_notebook_dependencies(current_cells)
+    valid_cell_keys = list(current_cells.keys())
     router_llm = architect_llm.with_structured_output(RoutingDecision)
     
     system_prompt = f"""
@@ -30,12 +31,25 @@ def dependency_analyzer_node(state: NotebookState):
     Here is the exact structure of their current code (what each cell defines and calls):
     {ast_map}
     
+    The valid cell keys for this notebook are (use ONLY these exact strings):
+    {valid_cell_keys}
+    
     Your task:
     1. Determine if the student is asking a theoretical question (needs_understanding = True).
     2. Determine EXACTLY which cells need to be modified to fulfill a code change.
+       - You MUST use only the exact key names from the list above (e.g. 'config', 'main_algorithm').
+       - NEVER use positional labels like 'Cell_0', 'Cell_8', etc. Those are invalid.
     3. CRITICAL: If a function definition changes in one cell (e.g., 'evaluation'), you MUST also flag the cell where it is registered or called (e.g., 'toolbox').
     """
     decision = router_llm.invoke(system_prompt)
+
+    # Guard: strip any hallucinated 'Cell_N' labels that the LLM might return
+    filtered = [c for c in decision.cells_to_modify if c in valid_cell_keys]
+    if len(filtered) != len(decision.cells_to_modify):
+        invalid = [c for c in decision.cells_to_modify if c not in valid_cell_keys]
+        print(f"    -> [Analyzer] WARNING: Dropped invalid cell keys {invalid}. Valid keys: {valid_cell_keys}")
+    decision.cells_to_modify = filtered
+
     print(f"    -> [Analyzer] Flagged cells for modification: {decision.cells_to_modify}")
     if decision.needs_understanding:
         print(f"    -> [Analyzer] Flagged as an educational query.")
@@ -52,9 +66,12 @@ def modifier_agent_node(state: NotebookState):
     print(f"--> [Modifier Agent] Initiating surgical rewrite for: {cells_to_edit}")
     
     if not cells_to_edit:
-        return state
+        print("    --> [Modifier Agent] No cells flagged for modification. No changes made.")
+        # Return an empty update — LangGraph merges this with existing state
+        return {}
     
-    current_code_context = {cell: state["notebook_cells"].get(cell, "") for cell in cells_to_edit}
+    current_notebook = state["notebook_cells"]  # full notebook dict
+    current_code_context = {cell: current_notebook.get(cell, "") for cell in cells_to_edit}
     modifier_llm = architect_llm.with_structured_output(ModifiedCells)
     system_prompt = f"""
     You are surgical code modifier for a DEAP Evolutionary Algorithm codebase. The student has requested this change:"{state['user_prompt']}"
@@ -69,7 +86,10 @@ def modifier_agent_node(state: NotebookState):
     """
     result = modifier_llm.invoke(system_prompt)
     print(f" --> [Modifier Agent] Successfully rewritten {list(result.updated_cells.keys())}")
-    return {"notebook_cells": result.updated_cells}
+    # Merge the LLM's updated cells back into the FULL notebook so state always
+    # contains all 12 cells, not just the ones that were modified.
+    merged = {**current_notebook, **result.updated_cells}
+    return {"notebook_cells": merged}
 
 # Fixer debugger agent handles runtime tracebacks
 def fixer_agent_node(state: NotebookState):

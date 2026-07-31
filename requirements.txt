@@ -3,6 +3,7 @@ uvicorn[standard]
 python-dotenv
 pydantic
 langchain-openai
+langchain-nvidia-ai-endpoints
 langgraph
 mem0ai
 openai

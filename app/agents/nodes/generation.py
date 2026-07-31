@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pydantic import BaseModel, Field
 from app.agents.state import NotebookState, CoderState
-from app.core.llm import architect_llm, coder_llm
+from app.core.llm import architect_llm, coder_llm, guardrail_llm
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class PromptValidation(BaseModel):
 
 def prompt_guardrail_node(state: NotebookState):
     print(f"--> [Gatekeeper] Inspecting prompt : '{state['user_prompt']}'")
-    validator = coder_llm.with_structured_output(PromptValidation)
+    validator = guardrail_llm.with_structured_output(PromptValidation)
 
     system_prompt = f"""
     You are the domain gatekeeper for an educational platform teaching Evolutionary Algorithms (DEAP).
