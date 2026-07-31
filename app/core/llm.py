@@ -1,106 +1,156 @@
-# import os
-# from dotenv import load_dotenv
-# from langchain_openai import ChatOpenAI
+"""
+app/core/llm.py
+---------------
+LLM handles for all EvoAcademy agents.
 
-# load_dotenv()
-# # Architect model for task planning and tutoring
-# architect_llm = ChatOpenAI(
-#   base_url="https://router.huggingface.co/v1",
-#   model="zai-org/GLM-5.2:novita",
-#   api_key=os.getenv("HF_TOKEN"), 
-#   temperature=1,
-#   top_p=0.95,
-#   max_tokens=16384,
-#   timeout=300,  # Increased timeout for long thinking times
-# )
+Architecture
+------------
+All model access goes through ModelEnsemble instances defined at the bottom
+of this file.  Each ensemble is cloud-first (ZhipuAI GLM-5.2 via NVIDIA NIM,
+using the native ChatNVIDIA client) with Ollama local as the automatic fallback,
+so the system stays operational even without internet access.
 
-# # Coder model for parallel code block writing
-# coder_llm = ChatOpenAI(
-#   base_url="https://router.huggingface.co/v1",
-#   model="zai-org/GLM-5.2:novita",
-#   api_key=os.getenv("HF_TOKEN"), 
-#   temperature=1,
-#   top_p=0.95,
-#   max_tokens=16384,
-#   timeout=300,  # Increased timeout for long thinking times
-# )
+Raw model handles (_cloud_*, _local_*) are kept as private module-level
+objects and are NOT imported directly by agent nodes.  Agent nodes should
+import the ensemble handles (architect_llm, coder_llm, guardrail_llm) only.
 
-# import os
-# from dotenv import load_dotenv
-# from langchain_nvidia_ai_endpoints import ChatNVIDIA
+Ensemble strategies per role
+-----------------------------
+architect_llm  (fallback) — Planning, analysis, tutoring, summaries.
+                            Quality matters; cloud-first, local on failure.
+coder_llm      (race)     — Parallel code cell generation.
+                            Fire both cloud and local; return the winner.
+                            Distributes load and minimises tail latency.
+guardrail_llm  (vote)     — Prompt domain validation.
+                            Both models vote; majority decides is_valid_ea.
+                            Reduces false positives / negatives.
 
-# load_dotenv()
-# # Architect model for task planning and tutoring
-# architect_llm = ChatNVIDIA(
-#   model="nvidia/nemotron-3-ultra-550b-a55b",
-#   api_key=os.getenv("NVIDIA_API_KEY"), 
-#   temperature=1,
-#   top_p=0.95,
-#   max_tokens=16384,
-#   reasoning_budget=16384,
-#   chat_template_kwargs={"enable_thinking":True},
-# )
-
-# # Coder model for parallel code block writing
-# coder_llm = ChatNVIDIA(
-#   model="nvidia/nemotron-3-ultra-550b-a55b",
-#   api_key=os.getenv("NVIDIA_API_KEY"), 
-#   temperature=1,
-#   top_p=0.95,
-#   max_tokens=16384,
-#   reasoning_budget=16384,
-#   chat_template_kwargs={"enable_thinking":True},
-# )
-
-# import os
-# from dotenv import load_dotenv
-# from langchain_openai import ChatOpenAI
-
-# load_dotenv()
-# architect_llm = ChatOpenAI(
-#   base_url="https://api.endpoints.deepinfra.com/v1",
-#   model="meta-llama/llama-4-scout-17b-16e",
-#   api_key=os.getenv("DEEPINFRA_API_KEY"), 
-#   temperature=1,
-#   max_tokens=16384,
-#   timeout=300,
-# )
-
-# coder_llm = ChatOpenAI(
-#   base_url="https://api.endpoints.deepinfra.com/v1",
-#   model="meta-llama/llama-4-scout-17b-16e",
-#   api_key=os.getenv("DEEPINFRA_API_KEY"), 
-#   temperature=1,
-#   max_tokens=16384,
-#   timeout=300,
-# )
-
+Environment variables
+---------------------
+NVIDIA_API_KEY    — NVIDIA NIM API key (required for cloud path)
+NIM_MODEL         — NIM model ID (default: z-ai/glm-5.2)
+CLOUD_TIMEOUT     — Cloud request timeout in seconds (default: 120)
+OLLAMA_BASE_URL   — Ollama server URL (default: http://localhost:11434)
+OLLAMA_MODEL      — Local model name (default: qwen2.5-coder:3b-base-q5_1)
+OLLAMA_TIMEOUT    — Ollama request timeout in seconds (default: 300)
+"""
+import logging
 import os
+
 from dotenv import load_dotenv
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_ollama import ChatOllama
 
+from app.core.ensemble import ModelEnsemble
+
 load_dotenv()
+logger = logging.getLogger(__name__)
 
-# Ollama base URL — defaults to localhost, configurable via env var
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+# ---------------------------------------------------------------------------
+# Configuration — all values are overridable via environment variables
+# ---------------------------------------------------------------------------
 
-# Architect model for task planning and tutoring
-architect_llm = ChatOllama(
-    model=OLLAMA_MODEL,
-    base_url=OLLAMA_BASE_URL,
-    temperature=1,
-    top_p=0.95,
-    num_predict=16384,     # Ollama equivalent of max_tokens
-    timeout=300,           # Increased timeout for local inference
+# Cloud: ZhipuAI GLM-5.2 via NVIDIA NIM (native ChatNVIDIA client)
+_NIM_API_KEY   = os.getenv("NVIDIA_API_KEY", "")
+_NIM_MODEL     = os.getenv("NIM_MODEL", "z-ai/glm-5.2")
+_CLOUD_TIMEOUT = int(os.getenv("CLOUD_TIMEOUT", "120"))
+
+# Local (Ollama) settings
+_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b-base-q5_1")
+_OLLAMA_TIMEOUT  = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+
+logger.info(
+    "[LLM] Cloud model : %s @ NVIDIA NIM (timeout=%ds)",
+    _NIM_MODEL, _CLOUD_TIMEOUT,
+)
+logger.info(
+    "[LLM] Local model : %s @ %s (timeout=%ds)",
+    _OLLAMA_MODEL, _OLLAMA_BASE_URL, _OLLAMA_TIMEOUT,
 )
 
-# Coder model for parallel code block writing
-coder_llm = ChatOllama(
-    model=OLLAMA_MODEL,
-    base_url=OLLAMA_BASE_URL,
+# ---------------------------------------------------------------------------
+# Raw model handles (private — do not import directly from agent nodes)
+# ---------------------------------------------------------------------------
+
+# Cloud — architect role (temperature=1 for creative planning / tutoring)
+_cloud_architect = ChatNVIDIA(
+    model=_NIM_MODEL,
+    api_key=_NIM_API_KEY or "placeholder",
     temperature=1,
+    top_p=1,
+    max_tokens=16384,
+    seed=42,
+)
+
+# Cloud — coder role (lower temperature for deterministic code generation)
+_cloud_coder = ChatNVIDIA(
+    model=_NIM_MODEL,
+    api_key=_NIM_API_KEY or "placeholder",
+    temperature=0.2,
+    top_p=1,
+    max_tokens=16384,
+    seed=42,
+)
+
+# Local fallback — architect role
+_local_architect = ChatOllama(
+    model=_OLLAMA_MODEL,
+    base_url=_OLLAMA_BASE_URL,
+    temperature=0.7,
     top_p=0.95,
     num_predict=16384,
-    timeout=300,
+    timeout=_OLLAMA_TIMEOUT,
+)
+
+# Local fallback — coder role
+_local_coder = ChatOllama(
+    model=_OLLAMA_MODEL,
+    base_url=_OLLAMA_BASE_URL,
+    temperature=0.2,
+    top_p=0.95,
+    num_predict=8192,
+    timeout=_OLLAMA_TIMEOUT,
+)
+
+# ---------------------------------------------------------------------------
+# Ensemble handles (public — import these in agent nodes)
+# ---------------------------------------------------------------------------
+
+# Architect ensemble: fallback — cloud first, local on failure
+# Used by: task_splitter, dependency_analyzer, modifier_agent,
+#          learner_agent, _generate_summary
+architect_llm = ModelEnsemble(
+    models=[
+        ("zai-glm52", _cloud_architect),
+        ("ollama",    _local_architect),
+    ],
+    strategy="fallback",
+    label="architect",
+)
+
+# Coder ensemble: race — fire cloud + local simultaneously, first wins.
+# Distributes the load of 12 parallel cell-generation calls across both
+# backends while cutting median latency.
+# Used by: parallel_coder_node
+coder_llm = ModelEnsemble(
+    models=[
+        ("zai-glm52", _cloud_coder),
+        ("ollama",    _local_coder),
+    ],
+    strategy="race",
+    label="coder",
+)
+
+# Guardrail ensemble: vote — both models validate; majority wins.
+# Reduces false positives (blocking valid EA prompts) and false negatives
+# (letting off-topic prompts through).
+# Used by: prompt_guardrail_node
+guardrail_llm = ModelEnsemble(
+    models=[
+        ("zai-glm52", _cloud_architect),
+        ("ollama",    _local_architect),
+    ],
+    strategy="vote",
+    label="guardrail",
 )

@@ -73,17 +73,22 @@ class StorageService:
         version_number: int,
         cells: NotebookCells,
         parent_cells: Optional[NotebookCells] = None,
+        get_ancestor_cells: Optional[Callable[[int], Optional[NotebookCells]]] = None,
     ) -> Tuple[str, str, bool, Optional[int]]:
         """
         Persist a notebook version to disk using delta compression where possible.
 
         Parameters
         ----------
-        session_id      : session identifier
-        version_number  : the new version number
-        cells           : full NotebookCells for this version
-        parent_cells    : full NotebookCells of the direct parent version
-                          (None forces a snapshot, e.g. first generate)
+        session_id        : session identifier
+        version_number    : the new version number
+        cells             : full NotebookCells for this version
+        parent_cells      : full NotebookCells of the direct parent version
+                            (None forces a snapshot, e.g. first generate)
+        get_ancestor_cells: callable(base_version_number) → NotebookCells | None
+                            Used to load the base snapshot for delta diffing.
+                            If None, falls back to diffing against parent_cells
+                            (less accurate but safe for v2).
 
         Returns
         -------
@@ -100,7 +105,8 @@ class StorageService:
             delta_size = None
         else:
             rel_path, checksum, delta_size = self._save_delta(
-                session_dir, version_number, cells, parent_cells
+                session_dir, version_number, cells, parent_cells,
+                get_ancestor_cells=get_ancestor_cells,
             )
 
         logger.info(
@@ -157,15 +163,20 @@ class StorageService:
         version_number: int,
         cells: NotebookCells,
         parent_cells: NotebookCells,
+        get_ancestor_cells: Optional[Callable[[int], Optional[NotebookCells]]] = None,
     ) -> Tuple[str, str, int]:
         """
         Compute and write a .delta.json file.
         Returns (rel_path, checksum, delta_size_bytes).
 
         base_version_number is set to the most recent snapshot ≤ (version_number - 1).
-        Since we always snapshot at multiples of SNAPSHOT_INTERVAL, the nearest
-        snapshot ancestor is the largest multiple of SNAPSHOT_INTERVAL that is
-        strictly less than version_number, or 1 if none.
+        The delta is stored as the diff between `cells` and the BASE SNAPSHOT
+        (not the direct parent).  This guarantees that apply_to(base_snapshot)
+        correctly reconstructs the full state for any version in the chain.
+
+        If the base snapshot cannot be loaded, we fall back to diffing against
+        parent_cells.  That only works perfectly when (version_number == 2),
+        i.e. direct child of the snapshot, so a warning is emitted otherwise.
         """
         # Nearest snapshot version number
         prev = version_number - 1
@@ -175,8 +186,29 @@ class StorageService:
             # Walk back to the most recent snapshot multiple
             base_ver = (prev // SNAPSHOT_INTERVAL) * SNAPSHOT_INTERVAL or 1
 
+        # Load the base snapshot to diff against — this is the anchor that
+        # apply_to() will use during reconstruction.
+        base_cells: NotebookCells = parent_cells  # safe fallback
+        if get_ancestor_cells is not None:
+            loaded = get_ancestor_cells(base_ver)
+            if loaded is not None:
+                base_cells = loaded
+            else:
+                logger.warning(
+                    f"[Storage] Could not load base snapshot v{base_ver} for delta diff; "
+                    "falling back to parent_cells (reconstruction may be inaccurate)."
+                )
+        elif version_number > 2:
+            # No loader provided and we're not a direct child of the snapshot;
+            # the fallback will produce an incorrect delta.
+            logger.warning(
+                f"[Storage] get_ancestor_cells not provided for v{version_number}; "
+                f"delta will be diffed against parent (v{version_number - 1}) instead of "
+                f"snapshot v{base_ver}. Reconstruction may be inaccurate."
+            )
+
         delta = CellDelta.compute(
-            parent_cells=parent_cells,
+            parent_cells=base_cells,
             new_cells=cells,
             base_version_number=base_ver,
         )

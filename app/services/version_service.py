@@ -439,14 +439,26 @@ class VersionService:
             version_number=version_number,
             cells=cells,
             parent_cells=parent_cells,
+            get_ancestor_cells=self._make_ancestor_loader(session_id, notebook.notebook_id),
         )
 
-        # Duplicate detection: skip if checksum matches current active
+        # Duplicate detection (two-layer):
+        # Layer 1 — fast checksum match (same file type, e.g. snapshot→snapshot)
         if notebook.active_version_id:
             current = self.version_repo.get_version_by_id(notebook.active_version_id)
             if current and current.checksum == checksum:
                 logger.info("[VersionService] No change detected (checksum match). Skipping version creation.")
+                # Remove the orphaned file we just wrote
+                self._delete_file_if_exists(file_path)
                 return current, notebook
+
+        # Layer 2 — content equality check (catches .ipynb vs .delta.json cross-type)
+        # If the delta has no changed cells, the content is identical to the parent.
+        if not is_snapshot and parent_cells is not None and cells.to_dict() == parent_cells.to_dict():
+            logger.info("[VersionService] No cell changes detected (delta is empty). Skipping version creation.")
+            self._delete_file_if_exists(file_path)
+            if notebook.active_version_id:
+                return self.version_repo.get_version_by_id(notebook.active_version_id), notebook
 
         # Generate summary (async LLM call)
         summary = await _generate_summary(prompt, cells_modified or [], operation_type)
@@ -535,3 +547,20 @@ class VersionService:
                 return None
 
         return _get_ancestor_cells
+
+    def _delete_file_if_exists(self, rel_or_abs_path: str) -> None:
+        """Delete a file written speculatively if we decide to discard the version."""
+        try:
+            from app.services.storage_service import STORAGE_ROOT
+            abs_path = rel_or_abs_path if os.path.isabs(rel_or_abs_path) else os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)
+                ))),
+                rel_or_abs_path
+            )
+            if os.path.exists(abs_path):
+                os.remove(abs_path)
+                logger.info(f"[VersionService] Removed orphaned file: {abs_path}")
+        except Exception as e:
+            logger.warning(f"[VersionService] Could not remove orphaned file '{rel_or_abs_path}': {e}")
+
