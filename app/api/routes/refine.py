@@ -2,53 +2,117 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from typing import Dict, List
+from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.services.version_service import VersionService
+from app.schemas.frontend_models import NotebookStructure, NotebookCell
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class RefineRequest(BaseModel):
-    session_id: str
-    user_prompt: str = Field(..., description="The student's question or modification request")
-    current_cells: Dict[str, str] = Field(..., description="The current state of the 12 DEAP cells")
+class UnifiedRefineRequest(BaseModel):
+    model_config = {"extra": "allow"}
+    
+    # Legacy fields
+    session_id: Optional[str] = None
+    user_prompt: Optional[str] = None
+    current_cells: Optional[Dict[str, str]] = None
+    
+    # New frontend fields
+    user_id: Optional[str] = None
+    notebook_id: Optional[str] = None
+    instruction: Optional[str] = None
+    notebook: Optional[NotebookStructure] = None
 
 
-class RefineResponse(BaseModel):
-    status: str
-    cells: Dict[str, str]
-    cells_modified: List[str]
-    tutor_explanation: str
-    version_number: int
-    version_id: str
-
-
-@router.post("/refine", response_model=RefineResponse)
-async def refine_notebook(request: RefineRequest, db: Session = Depends(get_db)):
+@router.post("/refine", response_model=Any)
+@router.post("/v1/modify", response_model=Any)
+@router.post("/v1/sessions/{session_id}/modify", response_model=Any)
+async def refine_notebook(request: UnifiedRefineRequest, db: Session = Depends(get_db)):
     """
     Refine an existing notebook. Creates a new immutable version.
     Previous version is never overwritten.
     """
-    logger.info(f"[/refine] session={request.session_id} prompt='{request.user_prompt[:60]}'")
+    session_id = request.session_id or request.notebook_id or request.user_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session_id or notebook_id")
+
+    user_prompt = request.user_prompt or request.instruction
+    if not user_prompt:
+        raise HTTPException(status_code=400, detail="Missing user_prompt or instruction")
+
+    # Extract current cells
+    if request.notebook:
+        current_cells = {}
+        for cell in request.notebook.cells:
+            if cell.cell_name:
+                current_cells[cell.cell_name] = cell.source
+    else:
+        current_cells = request.current_cells or {}
+
+    logger.info(f"[/refine] session={session_id} prompt='{user_prompt[:60]}'")
+    
+    deap_order = [
+        "imports", "config", "creator", "evaluation", "crossover", "mutation", "selection",
+        "initialization", "toolbox", "main_algorithm", "stats", "visualization"
+    ]
+
     try:
         svc = VersionService(db)
         result = await svc.refine(
-            session_id=request.session_id,
-            user_prompt=request.user_prompt,
-            current_cells=request.current_cells,
+            session_id=session_id,
+            user_prompt=user_prompt,
+            current_cells=current_cells,
         )
-        return RefineResponse(**result)
+
+        cells_modified_indices = []
+        cells_modified_names = result.get("cells_modified", [])
+        for name in cells_modified_names:
+            if name in deap_order:
+                cells_modified_indices.append(deap_order.index(name))
+
+        if request.notebook:
+            cells = []
+            flat_cells = result.get("cells", {})
+            for idx, name in enumerate(deap_order):
+                cells.append(NotebookCell(
+                    cell_type="code",
+                    cell_name=name,
+                    source=flat_cells.get(name, ""),
+                    metadata={"cell_index": idx}
+                ))
+            notebook_struct = NotebookStructure(
+                cells=cells,
+                requirements="deap\nnumpy\nmatplotlib"
+            )
+            return {
+                "notebook_id": session_id,
+                "notebook": notebook_struct.model_dump(),
+                "changes_made": [result.get("tutor_explanation", "Modified cells")],
+                "cells_modified": cells_modified_indices,
+                "requirements": "deap\nnumpy\nmatplotlib",
+                "message": result.get("tutor_explanation", "Notebook modified successfully")
+            }
+        else:
+            return {
+                "status": "success",
+                "cells": result.get("cells", {}),
+                "cells_modified": cells_modified_names,
+                "tutor_explanation": result.get("tutor_explanation", ""),
+                "version_number": result.get("version_number", 0),
+                "version_id": result.get("version_id", "")
+            }
+
     except Exception as e:
         logger.exception(f"[/refine] Failed: {e}")
         try:
             svc = VersionService(db)
-            active_cells_obj = svc.get_active_cells(request.session_id)
+            active_cells_obj = svc.get_active_cells(session_id)
             active_cells = active_cells_obj.to_dict() if active_cells_obj else {}
-            notebook = svc.notebook_repo.get_notebook_by_session(request.session_id)
+            notebook = svc.notebook_repo.get_notebook_by_session(session_id)
             active_ver_num = 1
             active_ver_id = ""
             if notebook and notebook.active_version_id:
@@ -57,14 +121,36 @@ async def refine_notebook(request: RefineRequest, db: Session = Depends(get_db))
                     active_ver_num = active_ver.version_number
                     active_ver_id = active_ver.version_id
 
-            return RefineResponse(
-                status="reverted",
-                cells=active_cells,
-                cells_modified=[],
-                tutor_explanation=f"Refinement pipeline error: {str(e)}. Automatically rolled back to the previous working version.",
-                version_number=active_ver_num,
-                version_id=active_ver_id,
-            )
+            if request.notebook:
+                cells = []
+                for idx, name in enumerate(deap_order):
+                    cells.append(NotebookCell(
+                        cell_type="code",
+                        cell_name=name,
+                        source=active_cells.get(name, ""),
+                        metadata={"cell_index": idx}
+                    ))
+                notebook_struct = NotebookStructure(
+                    cells=cells,
+                    requirements="deap\nnumpy\nmatplotlib"
+                )
+                return {
+                    "notebook_id": session_id,
+                    "notebook": notebook_struct.model_dump(),
+                    "changes_made": ["reverted"],
+                    "cells_modified": [],
+                    "requirements": "deap\nnumpy\nmatplotlib",
+                    "message": f"Refinement pipeline error: {str(e)}. Automatically rolled back to the previous working version."
+                }
+            else:
+                return {
+                    "status": "reverted",
+                    "cells": active_cells,
+                    "cells_modified": [],
+                    "tutor_explanation": f"Refinement pipeline error: {str(e)}. Automatically rolled back to the previous working version.",
+                    "version_number": active_ver_num,
+                    "version_id": active_ver_id,
+                }
         except Exception as fallback_err:
             logger.exception(f"[/refine] Rollback fallback failed: {fallback_err}")
             raise HTTPException(status_code=500, detail=str(e))
