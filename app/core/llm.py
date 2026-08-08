@@ -73,7 +73,6 @@ logger.info(
 # Raw model handles (private — do not import directly from agent nodes)
 # ---------------------------------------------------------------------------
 
-# Cloud — architect role (temperature=1 for creative planning / tutoring)
 _cloud_architect = ChatNVIDIA(
     model=_NIM_MODEL,
     api_key=_NIM_API_KEY or "placeholder",
@@ -81,9 +80,9 @@ _cloud_architect = ChatNVIDIA(
     top_p=1,
     max_tokens=16384,
     seed=42,
+    timeout=_CLOUD_TIMEOUT,
 )
 
-# Cloud — coder role (lower temperature for deterministic code generation)
 _cloud_coder = ChatNVIDIA(
     model=_NIM_MODEL,
     api_key=_NIM_API_KEY or "placeholder",
@@ -91,6 +90,7 @@ _cloud_coder = ChatNVIDIA(
     top_p=1,
     max_tokens=16384,
     seed=42,
+    timeout=_CLOUD_TIMEOUT,
 )
 
 # Local fallback — architect role
@@ -123,7 +123,7 @@ _local_coder = ChatOllama(
 architect_llm = ModelEnsemble(
     models=[
         ("zai-glm52", _cloud_architect),
-        ("ollama",    _local_architect),
+        ("ollama",    _local_coder),
     ],
     strategy="fallback",
     label="architect",
@@ -142,15 +142,13 @@ coder_llm = ModelEnsemble(
     label="coder",
 )
 
-# Guardrail ensemble: vote — both models validate; majority wins.
-# Reduces false positives (blocking valid EA prompts) and false negatives
-# (letting off-topic prompts through).
+# Guardrail ensemble: fallback
 # Used by: prompt_guardrail_node
 guardrail_llm = ModelEnsemble(
     models=[
         ("zai-glm52", _cloud_architect),
-        ("ollama",    _local_architect),
+        ("ollama",    _local_coder),
     ],
-    strategy="vote",
+    strategy="fallback",
     label="guardrail",
 )
