@@ -18,7 +18,7 @@ export function useHistory(sessionId, applyRollback) {
         setError(null);
         try {
             const data = await getHistory(sessionId);
-            setHistory(data || []);
+            setHistory(data?.versions || []);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -37,8 +37,8 @@ export function useHistory(sessionId, applyRollback) {
                 prev.map(v => ({ ...v, is_active: v.version_number === versionNumber }))
             );
             // Apply the rolled-back cells to the editor
-            if (res.active_version?.cells) {
-                applyRollback(res.active_version.cells, versionNumber, res.active_version.version_id || "");
+            if (res && res.cells) {
+                applyRollback(res.cells, versionNumber, res.version_id || "");
             }
         } catch (err) {
             setError(err.message);
@@ -56,7 +56,7 @@ export function useHistory(sessionId, applyRollback) {
         setError(null);
         try {
             const results = await searchVersions(sessionId, query);
-            setSearchResults(results || []);
+            setSearchResults(results?.results || []);
         } catch (err) {
             setError(err.message);
             setSearchResults([]);
