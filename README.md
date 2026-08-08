@@ -1,71 +1,15 @@
-# EvoLab: Evolutionary Algorithm Tutor Backend
-
-EvoLab is a robust, version-controlled backend designed to support interactive learning, generation, refinement, and debugging of **Evolutionary Algorithms (EA)**. Powered by FastAPI, DEAP, LangGraph, and SQLAlchemy, EvoLab enables students to build, experiment with, and debug genetic algorithms using a structured 12-cell notebook format.
-
----
-
-## Features
-* **Structured EA Generation**: Automatically generates complete DEAP-based notebooks split into 12 structured cells corresponding to core genetic algorithm components.
-* **Smart Chat Refinement**: Allows students to request changes or ask follow-up questions. The tutor AI edits the specific cells and explains the reasoning.
-* **Self-Healing execution debugger**: Captures Python run-time traceback errors from execution environments and automatically provides code corrections.
-* **Semantic Version Control**: Creates immutable version histories for each session, stored locally in SQLite and indexed semantically using ChromaDB vector embeddings.
-* **Time Travel & Rollback**: Enables students to roll back the notebook to any historical version without losing future progress paths.
-
----
-
-## 1. Local Development Setup
-
-### System Prerequisites
-* Python 3.10+ (tested with Python 3.14)
-* SQLite3
-
-### Step-by-Step Setup
-
-1. **Clone the repository** and navigate to the project directory:
-   ```bash
-   cd d:\Projects\EvoLab
-   ```
-
-2. **Configure Environment Variables**:
-   Copy `.env.example` to `.env` and fill in your API credentials (e.g., `OPENAI_API_KEY`, etc.):
-   ```bash
-   copy .env.example .env
-   ```
-
-3. **Configure Python Virtual Environment**:
-   * **On Windows (PowerShell)**:
-     ```powershell
-     python -m venv venv
-     .\venv\Scripts\Activate.ps1
-     ```
-   * **On Windows (Command Prompt - CMD)**:
-     ```cmd
-     python -m venv venv
-     .\venv\Scripts\activate.bat
-     ```
-   * **On macOS/Linux**:
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-
-4. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-5. **Start the FastAPI Dev Server**:
-   ```bash
-   python -m app.main
-   ```
-   * The API will start and be available at: `http://localhost:8000`
-   * Interactive API documentation (Swagger UI) is available at: `http://localhost:8000/docs`
-
-6. **Run Test Suite**:
-   Verify everything is correctly installed and configured:
-   ```bash
-   python -m pytest
-   ```
+## Run it locally
+1. Have your .env ready. A demo one is given in the .env.example 
+2. Go to the root folder and then type
+If on macOS/Linux
+```
+python3 -m venv <your-virtual-environment-name>
+source <your-virtual-environment-name>/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app.main:app --port 8000 --reload
+```
+## API and it's usage
+**Base URL**: `http://localhost:8000` (or your deployed server address)
 
 ---
 

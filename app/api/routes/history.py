@@ -13,7 +13,7 @@ from app.db.database import get_db
 from app.services.version_service import VersionService
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/sessions/{session_id}")
 
 
 class RollbackRequest(BaseModel):

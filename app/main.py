@@ -9,13 +9,13 @@ Storage layout:
   Mem0 cloud                                          — user preferences
 
 API Endpoints:
-  POST /generate                         — generate new EA notebook
-  POST /refine                           — refine existing notebook
-  POST /debug                            — auto-fix runtime traceback
-  GET  /sessions/{id}/history            — full version timeline
-  POST /sessions/{id}/rollback           — metadata-only rollback
-  GET  /sessions/{id}/search?q=...       — semantic search via ChromaDB
-  GET  /health                           — connectivity check
+  POST /api/v1/llm/generate           — generate new EA notebook
+  POST /api/v1/llm/refine             — refine existing notebook
+  POST /api/v1/llm/debug              — auto-fix runtime traceback
+  GET  /api/v1/sessions/{id}/history  — full version timeline
+  POST /api/v1/sessions/{id}/rollback — metadata-only rollback
+  GET  /api/v1/sessions/{id}/search?q=... — semantic search via ChromaDB
+  GET  /health                        — connectivity check
 """
 import logging
 import uvicorn
@@ -24,7 +24,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.api.routes import generate, refine, debug, history
+from app.api.routes import generate, refine, debug, history, execute
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,6 +62,7 @@ app.include_router(generate.router, tags=["Notebooks"])
 app.include_router(refine.router, tags=["Notebooks"])
 app.include_router(debug.router, tags=["Notebooks"])
 app.include_router(history.router, tags=["Version History"])
+app.include_router(execute.router, tags=["Execution"])
 
 
 @app.get("/health", tags=["System"])

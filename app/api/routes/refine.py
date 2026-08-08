@@ -10,7 +10,7 @@ from app.services.version_service import VersionService
 from app.schemas.frontend_models import NotebookStructure, NotebookCell
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/llm")
 
 
 class UnifiedRefineRequest(BaseModel):

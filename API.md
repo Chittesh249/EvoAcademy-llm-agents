@@ -2,7 +2,9 @@
 
 Welcome to the EvoAcademy backend API documentation. The API serves as the backbone for generating, refining, debugging, and managing the version history of DEAP Evolutionary Algorithm (EA) Jupyter Notebooks.
 
-**Base URL**: `http://localhost:8000` (or your deployed server address)
+**Base URL**: `http://localhost:8000` (or your deployed server address, e.g. Render)
+
+> All routes use the `/api/v1/` prefix to match the standard frontend structure.
 
 ---
 
@@ -21,13 +23,13 @@ Check if the API is running and accessible.
   "features": ["version_history", "semantic_search", "rollback", "user_preferences"]
 }
 ```
-**How to Use**: Call this endpoint when the frontend application first loads to ensure the backend server is reachable before allowing the user to interact with the platform.
+**How to Use**: Call this endpoint when the frontend application first loads to ensure the backend server is reachable.
 
 ---
 
 ## 2. Notebook Generation & Refinement
 
-### POST `/generate`
+### POST `/api/v1/llm/generate`
 Generate a brand-new evolutionary algorithm notebook from a natural language prompt. This creates `version_1.ipynb` and clears any previous history for the provided session.
 
 **Request Body** (`application/json`):
@@ -62,10 +64,10 @@ Generate a brand-new evolutionary algorithm notebook from a natural language pro
   "version_id": "string (UUID for the generated version)"
 }
 ```
-**How to Use**: Use this when a student submits their very first problem prompt (e.g., "Solve the Traveling Salesperson Problem"). The returned `cells` dictionary contains the code for the 12 structural DEAP blocks, which you should map directly to the frontend code editor UI.
+**How to Use**: Use this when a student submits their very first problem prompt. The returned `cells` dictionary maps directly to the 12 DEAP code block editors in the frontend.
 
-### POST `/refine`
-Refine an existing notebook based on a follow-up question or modification request. This securely creates a new immutable version without overwriting previous history.
+### POST `/api/v1/llm/refine`
+Refine an existing notebook based on a follow-up question or modification request. Creates a new immutable version without overwriting previous history.
 
 **Request Body** (`application/json`):
 ```json
@@ -75,7 +77,7 @@ Refine an existing notebook based on a follow-up question or modification reques
   "current_cells": {
     "imports": "...",
     "config": "..."
-  } // Must include the current string state of the 12 DEAP cells
+  }
 }
 ```
 
@@ -83,28 +85,24 @@ Refine an existing notebook based on a follow-up question or modification reques
 ```json
 {
   "status": "string",
-  "cells": { 
-     // The newly updated 12 DEAP cells
-  },
+  "cells": { },
   "cells_modified": ["string (e.g., 'crossover', 'toolbox')"],
   "tutor_explanation": "string (Markdown explanation from the AI tutor)",
   "version_number": 2,
   "version_id": "string"
 }
 ```
-**How to Use**: Trigger this endpoint when the user asks a follow-up question in the chat, requests a code change, or asks for theoretical explanations. Display the `tutor_explanation` in the chat UI as a markdown message. Use the `cells_modified` array to visually highlight which code blocks the AI updated in the editor.
+**How to Use**: Trigger this when the user asks a follow-up question in the chat. Display `tutor_explanation` as a markdown message. Use `cells_modified` to visually highlight which code blocks were updated.
 
-### POST `/debug`
-Auto-fix a runtime error (traceback) thrown by the Jupyter kernel. Creates a new immutable version containing the fixed code.
+### POST `/api/v1/llm/debug`
+Auto-fix a runtime error (traceback) thrown by code execution. Creates a new immutable version containing the fixed code.
 
 **Request Body** (`application/json`):
 ```json
 {
   "session_id": "string",
-  "traceback_msg": "string (The raw runtime error thrown by the kernel execution)",
-  "current_cells": { 
-     // Current state of the 12 DEAP cells 
-  } 
+  "traceback_msg": "string (The raw runtime error)",
+  "current_cells": { }
 }
 ```
 
@@ -112,20 +110,20 @@ Auto-fix a runtime error (traceback) thrown by the Jupyter kernel. Creates a new
 ```json
 {
   "status": "string",
-  "cells": { ... },
+  "cells": { },
   "cells_modified": ["string"],
   "tutor_explanation": "string (Explanation of what caused the bug and how it was fixed)",
   "version_number": 3,
   "version_id": "string"
 }
 ```
-**How to Use**: If the frontend attempts to execute the Python code and the compiler/kernel throws a traceback error, automatically capture that traceback string and send it to this endpoint. The AI will diagnose the failure and return patched cells.
+**How to Use**: When the user pastes a traceback in the chat, automatically route to this endpoint instead of `/refine`. The frontend auto-detects tracebacks via the pattern `"Traceback (most recent call last)"`.
 
 ---
 
 ## 3. Version History & Time Travel
 
-### GET `/sessions/{session_id}/history`
+### GET `/api/v1/sessions/{session_id}/history`
 Returns the complete, chronological version timeline for a specific session.
 
 **Path Parameters**:
@@ -144,16 +142,13 @@ Returns the complete, chronological version timeline for a specific session.
     "checksum": "hash_string",
     "cells_modified": [],
     "created_at": "timestamp"
-  },
-  {
-     // ... version 2 ...
   }
 ]
 ```
-**How to Use**: Fetch this endpoint on load to display a "History Timeline" or "Commit Tree" in the UI. Use the `is_active` boolean to visually indicate which version the user is currently viewing/editing.
+**How to Use**: Fetch this on session load to populate the History panel. Use `is_active` to highlight the current version.
 
-### POST `/sessions/{session_id}/rollback`
-Rolls back the active state to a previous version. This is a pure metadata operation (it just moves the active pointer) and does not permanently delete any forward history.
+### POST `/api/v1/sessions/{session_id}/rollback`
+Rolls back the active state to a previous version. Pure metadata operation — no files are deleted.
 
 **Path Parameters**:
 - `session_id`: Unique identifier for the active session.
@@ -161,7 +156,7 @@ Rolls back the active state to a previous version. This is a pure metadata opera
 **Request Body** (`application/json`):
 ```json
 {
-  "version_number": 1 // The integer version number to revert back to
+  "version_number": 1
 }
 ```
 
@@ -172,15 +167,13 @@ Rolls back the active state to a previous version. This is a pure metadata opera
   "message": "Rolled back to version 1",
   "active_version": {
       "version_number": 1,
-      "cells": { 
-         // The historical code state of the rolled-back version 
-      } 
+      "cells": { }
   }
 }
 ```
-**How to Use**: Trigger this when a user clicks a "Revert to this version" button in your History Timeline. Immediately update the UI's code editor with the `cells` dictionary returned in the response object.
+**How to Use**: Trigger this when a user clicks "↩ Rollback" in the History panel. The frontend immediately updates the code editors with the returned `cells` dictionary.
 
-### GET `/sessions/{session_id}/search`
+### GET `/api/v1/sessions/{session_id}/search`
 Perform a natural language semantic search over the notebook version history using ChromaDB vector embeddings.
 
 **Path Parameters**:
@@ -197,8 +190,7 @@ Perform a natural language semantic search over the notebook version history usi
     "version_number": 2,
     "summary": "Added tournament selection logic to toolbox.",
     "similarity_score": 0.89
-    // ... other standard history metadata
   }
 ]
 ```
-**How to Use**: Provide a search bar component in the history/timeline panel. Users can type questions/queries to instantly filter past changes without having to manually read every commit summary.
+**How to Use**: Wire to the search bar in the History panel. Users type natural language queries to instantly find past changes.

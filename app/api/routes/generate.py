@@ -12,7 +12,7 @@ from app.schemas.frontend_models import NotebookStructure, NotebookCell
 from app.utils.request_parser import RequestParser
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/llm")
 
 
 class GenerateRequest(BaseModel):
