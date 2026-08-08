@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 import os
 import shutil
 from fastapi.testclient import TestClient
@@ -11,6 +11,7 @@ from app.db.database import Base, get_db
 from app.db.models import Notebook, NotebookVersion
 from app.services.version_service import VersionService
 from app.services.storage_service import STORAGE_ROOT
+from app.schemas.notebook import NotebookCells
 
 # Use file-based SQLite database for testing so all connections share the same tables/data
 import uuid
@@ -243,7 +244,7 @@ class TestVersionControl(unittest.TestCase):
         self.db.commit()
 
         # Mock disk load to return the active cells
-        mock_load_notebook.return_value = {"imports": "import deap", "config": "rate = 0.5"}
+        mock_load_notebook.return_value = NotebookCells.from_dict({"imports": "import deap", "config": "rate = 0.5"})
 
         # 2. Mock syntax error response (invalid Python syntax)
         mock_refine_ainvoke.return_value = {
@@ -293,7 +294,7 @@ class TestVersionControl(unittest.TestCase):
         svc.notebook_repo.set_active_version(notebook.notebook_id, v1.version_id)
         self.db.commit()
 
-        mock_load_notebook.return_value = {"imports": "import deap", "config": "rate = 0.5"}
+        mock_load_notebook.return_value = NotebookCells.from_dict({"imports": "import deap", "config": "rate = 0.5"})
 
         # 2. Mock pipeline throwing exception
         mock_refine_ainvoke.side_effect = Exception("LLM connection timed out")
@@ -373,7 +374,7 @@ class TestVersionControl(unittest.TestCase):
         svc.notebook_repo.set_active_version(notebook.notebook_id, v1.version_id)
         self.db.commit()
 
-        mock_load_notebook.return_value = {"imports": "import deap", "config": "rate = 0.5"}
+        mock_load_notebook.return_value = NotebookCells.from_dict({"imports": "import deap", "config": "rate = 0.5"})
 
         # 2. Mock debug validation failure (invalid Python syntax)
         mock_refine_ainvoke.return_value = {
@@ -401,7 +402,7 @@ class TestVersionControl(unittest.TestCase):
         notebook = svc.notebook_repo.get_or_create_notebook(self.session_id)
         
         with patch("app.services.version_service.storage_service.load_notebook") as mock_load:
-            mock_load.return_value = {"imports": "import deap", "config": "rate = 0.5"}
+            mock_load.return_value = NotebookCells.from_dict({"imports": "import deap", "config": "rate = 0.5"})
             
             v1 = svc.version_repo.create_version(
                 notebook_id=notebook.notebook_id,
@@ -519,6 +520,86 @@ class TestVersionControl(unittest.TestCase):
         embeddings = fn(["def mutFlipBit(): pass", "import deap"])
         self.assertEqual(len(embeddings), 2)
         self.assertEqual(len(embeddings[0]), 128)
+
+    @patch("app.services.version_service.generate_graph.ainvoke", new_callable=AsyncMock)
+    def test_frontend_v1_endpoints(self, mock_generate_ainvoke):
+        """Test v1/generate, v1/modify, and v1/sessions endpoints."""
+        # 1. Test /v1/generate with structured fields
+        mock_generate_ainvoke.return_value = {
+            "is_valid_ea_prompt": True,
+            "target_problem": "Sphere Problem",
+            "notebook_cells": {"imports": "import deap", "config": "rate = 0.5"},
+            "compiled_script": "compiled_sphere"
+        }
+
+        response = self.client.post(
+            "/v1/generate",
+            json={
+                "user_id": self.session_id,
+                "notebook_id": self.session_id,
+                "problemName": "Sphere Optimization",
+                "goalDescription": "Minimize sum of squares"
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["notebook_id"], self.session_id)
+        self.assertEqual(len(data["notebook"]["cells"]), 12)
+        self.assertEqual(data["notebook"]["cells"][0]["source"], "import deap")
+
+        # 2. Test /v1/sessions/{session_id}/modify
+        with patch("app.services.version_service.refine_graph.ainvoke", new_callable=AsyncMock) as mock_refine_ainvoke:
+            mock_refine_ainvoke.return_value = {
+                "notebook_cells": {"imports": "import deap", "config": "rate = 0.8"},
+                "cells_to_modify": ["config"]
+            }
+
+            # Build a mock 12-cells NotebookStructure
+            cells = []
+            from app.schemas.notebook import NotebookCells
+            for name in NotebookCells.model_fields.keys():
+                cells.append({"cell_type": "code", "cell_name": name, "source": "rate = 0.5" if name == "config" else ""})
+
+            response = self.client.post(
+                f"/v1/sessions/{self.session_id}/modify",
+                json={
+                    "user_id": self.session_id,
+                    "notebook_id": self.session_id,
+                    "instruction": "Increase rate",
+                    "notebook": {"cells": cells}
+                }
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["notebook_id"], self.session_id)
+            self.assertEqual(data["notebook"]["cells"][1]["source"], "rate = 0.8")
+
+        # 3. Test /v1/sessions/{session_id}/fix
+        with patch("app.services.version_service.refine_graph.ainvoke", new_callable=AsyncMock) as mock_refine_ainvoke:
+            mock_refine_ainvoke.return_value = {
+                "notebook_cells": {"imports": "import deap", "config": "rate = 0.9"},
+                "cells_to_modify": ["config"]
+            }
+
+            response = self.client.post(
+                f"/v1/sessions/{self.session_id}/fix",
+                json={
+                    "user_id": self.session_id,
+                    "notebook_id": self.session_id,
+                    "traceback": "NameError",
+                    "notebook": {"cells": cells}
+                }
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["notebook_id"], self.session_id)
+
+        # 4. Test /v1/sessions/{session_id} history retrieval
+        response = self.client.get(f"/v1/sessions/{self.session_id}")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["session_id"], self.session_id)
+        self.assertGreater(len(data["versions"]), 0)
 
 
 if __name__ == "__main__":
