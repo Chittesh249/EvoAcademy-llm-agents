@@ -29,8 +29,6 @@ class UnifiedDebugRequest(BaseModel):
 
 
 @router.post("/debug", response_model=Any)
-@router.post("/v1/fix", response_model=Any)
-@router.post("/v1/sessions/{session_id}/fix", response_model=Any)
 async def debug_notebook(request: UnifiedDebugRequest, db: Session = Depends(get_db)):
     """
     Auto-fix a runtime error in the active notebook.

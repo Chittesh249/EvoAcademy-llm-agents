@@ -35,6 +35,16 @@ export function usePyodide() {
                     script.onload = resolve;
                     script.onerror = () => reject(new Error("Failed to load Pyodide from CDN"));
                 });
+            } else if (!window.loadPyodide) {
+                // If script tag exists but loadPyodide isn't attached yet, wait for it
+                await new Promise(resolve => {
+                    const checkInterval = setInterval(() => {
+                        if (window.loadPyodide) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 50);
+                });
             }
 
             if (!active) return;

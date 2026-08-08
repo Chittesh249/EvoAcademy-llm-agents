@@ -52,7 +52,7 @@ function CodeCell({
 
     return (
         <div
-            className={`bg-[#0a0a0f] border border-white/5 rounded-lg overflow-hidden transition-all duration-200 ${
+            className={`shrink-0 bg-[#0a0a0f] border border-white/5 rounded-lg overflow-hidden transition-all duration-200 ${
                 isModified ? "border-[#7c3aed]/40 shadow-[0_0_12px_rgba(124,58,237,0.1)]" : ""
             }`}
             id={`cell-${cellKey}`}

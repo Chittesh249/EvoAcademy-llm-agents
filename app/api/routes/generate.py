@@ -71,7 +71,6 @@ def format_prompt_from_data(data: dict) -> str:
 
 
 @router.post("/generate", response_model=UnifiedGenerateResponse)
-@router.post("/v1/generate", response_model=UnifiedGenerateResponse)
 async def generate_notebook(request: GenerateRequest, db: Session = Depends(get_db)):
     """
     Generate a brand-new evolutionary algorithm notebook.

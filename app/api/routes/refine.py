@@ -29,8 +29,6 @@ class UnifiedRefineRequest(BaseModel):
 
 
 @router.post("/refine", response_model=Any)
-@router.post("/v1/modify", response_model=Any)
-@router.post("/v1/sessions/{session_id}/modify", response_model=Any)
 async def refine_notebook(request: UnifiedRefineRequest, db: Session = Depends(get_db)):
     """
     Refine an existing notebook. Creates a new immutable version.

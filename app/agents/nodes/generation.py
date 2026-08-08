@@ -62,6 +62,7 @@ class Subtasks(BaseModel):
 
 # Splits query into 12 detailed prompts
 def task_splitter_node(state: NotebookState):
+    print("--> [Task Splitter] Generating 12 subtask prompts... (This may take up to a minute for the LLM to process)")
     structured_llm = architect_llm.with_structured_output(Subtasks)
 
     system_prompt = f"""You are an expert in Evolutionary algorithms and the DEAP Python library.

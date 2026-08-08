@@ -24,8 +24,7 @@ class RollbackRequest(BaseModel):
 # GET /sessions/{session_id}/history or /v1/sessions/{session_id}
 # Returns the full version timeline for the session.
 # ------------------------------------------------------------------
-@router.get("/sessions/{session_id}/history")
-@router.get("/v1/sessions/{session_id}")
+@router.get("/history")
 async def get_history(session_id: str, db: Session = Depends(get_db)):
     """
     Returns the complete version timeline for a session.
@@ -42,8 +41,7 @@ async def get_history(session_id: str, db: Session = Depends(get_db)):
 # Metadata-only rollback: changes active_version_id pointer only.
 # No files are created, copied, or deleted.
 # ------------------------------------------------------------------
-@router.post("/sessions/{session_id}/rollback")
-@router.post("/v1/sessions/{session_id}/rollback")
+@router.post("/rollback")
 async def rollback(session_id: str, request: RollbackRequest, db: Session = Depends(get_db)):
     """
     Rolls back to a specific version by updating active_version_id.
@@ -66,8 +64,7 @@ async def rollback(session_id: str, request: RollbackRequest, db: Session = Depe
 # GET /sessions/{session_id}/search?q=... or /v1/sessions/{session_id}/search?q=...
 # Natural language search over version summaries via ChromaDB.
 # ------------------------------------------------------------------
-@router.get("/sessions/{session_id}/search")
-@router.get("/v1/sessions/{session_id}/search")
+@router.get("/search")
 async def search_versions(
     session_id: str,
     q: str = Query(..., description="Natural language query, e.g. 'version where tournament selection was added'"),
